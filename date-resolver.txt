@@ -1,0 +1,181 @@
+function getRowDate(rowElement, { requireEvidence = false } = {}) {
+  const months = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+  ];
+  const monthsRegex = months.join("|");
+
+  const now = new Date();
+  const getArgDate = (d) => {
+    const parts = new Intl.DateTimeFormat('en', {timeZone:'America/Argentina/Buenos_Aires',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d);
+    const part = type => parts.find(p => p.type === type).value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
+  };
+  const todayStr = getArgDate(now);
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const yesterdayStr = getArgDate(yesterday);
+
+  // Extract row text to check if row time is in the future relative to current Argentina time
+  const rowText = (rowElement.innerText || "").replace(/\u00a0/g, " ").trim();
+  const timeMatch = rowText.match(/\b(\d{1,2}:\d{2})\b/);
+  const timeStr = timeMatch ? timeMatch[1] : "";
+
+  let isFutureTime = false;
+  if (timeStr) {
+    try {
+      const argTimeStr = now.toLocaleTimeString("en-GB", { timeZone: "America/Argentina/Buenos_Aires", hour: "2-digit", minute: "2-digit" });
+      const [nowH, nowM] = argTimeStr.split(":").map(Number);
+      const [txH, txM] = timeStr.split(":").map(Number);
+      const nowMinutes = nowH * 60 + nowM;
+      const txMinutes = txH * 60 + txM;
+      // If the transaction time is more than 5 minutes ahead of current Argentina clock, it CANNOT be today!
+      if (txMinutes > nowMinutes + 5) {
+        isFutureTime = true;
+      }
+    } catch (e) {
+      console.warn("[Zono MP Monitor] Error checking time comparison:", e);
+    }
+  }
+
+  // Scan for date header elements in the document
+  const candidates = Array.from(document.querySelectorAll("h1, h2, h3, h4, h5, h6, span, p, div, time, [role='heading']"));
+  const headers = [];
+
+  for (const el of candidates) {
+    if (requireEvidence && (!el.getClientRects().length || el.closest("[hidden],[aria-hidden='true'],[id^='zono-']"))) continue;
+    // Skip if inside navigation, search bars, or filter dropdowns
+    if (el.closest("nav, header, aside, [role='navigation'], [role='combobox'], [data-testid*='filter'], .andes-dropdown, .andes-filter, .andes-tab")) {
+      continue;
+    }
+    if (el.children.length > 3) continue;
+    const txt = (el.innerText || el.textContent || "").replace(/\u00a0/g, " ").trim();
+    if (!txt || txt.length > 40) continue;
+
+    const lower = txt.toLowerCase();
+    // Exclude if it contains currency, amount, or action words
+    if (lower.includes("$") || lower.includes("aprobado") || lower.includes("transferencia") || lower.includes("disponible") || lower.includes("filtr") || lower.includes("buscar") || lower.includes("tu dinero") || lower.includes("actividad") || lower.includes("resumen")) {
+      continue;
+    }
+
+    const isToday = lower === "hoy" || lower.startsWith("hoy ") || lower.startsWith("hoy·") || lower.startsWith("hoy,") || lower.startsWith("hoy -");
+    const isYesterday = lower === "ayer" || lower.startsWith("ayer ") || lower.startsWith("ayer·") || lower.startsWith("ayer,") || lower.startsWith("ayer -") || lower.includes("ayer") || lower === "antier" || lower === "anteayer";
+    const dateMatch = lower.match(new RegExp(`(?:(\\d{1,2})\\s+de\\s+(${monthsRegex})(?:\\s+de\\s+(\\d{4}))?)`));
+    const numericDate = lower.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const weekdayMatch = lower.match(/^(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)$/);
+
+    if (isToday || isYesterday || dateMatch || numericDate || weekdayMatch) {
+      headers.push({
+        el,
+        text: txt,
+        isToday,
+        isYesterday,
+        dateMatch,
+        numericDate,
+        weekdayMatch: !isToday && !isYesterday && !dateMatch && !!weekdayMatch,
+        weekdayStr: weekdayMatch ? weekdayMatch[0] : null
+      });
+    }
+  }
+
+  // Find the header that immediately precedes this rowElement in document order
+  let matchedHeader = null;
+  for (const h of headers) {
+    if (h.el.contains(rowElement) || rowElement.contains(h.el)) continue;
+    try {
+      const pos = h.el.compareDocumentPosition(rowElement);
+      // Node.DOCUMENT_POSITION_FOLLOWING = 4 means rowElement follows h.el
+      if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
+        matchedHeader = h;
+      }
+    } catch (e) {
+      // Ignore comparison errors
+    }
+  }
+
+  // Bank enrichment must never fabricate a calendar day from the current clock.
+  if (!matchedHeader && requireEvidence) return null;
+  // Safeguard: If the row's time is in the future relative to now, it cannot be from today
+  if (!matchedHeader && isFutureTime) {
+    return {
+      dateStr: yesterdayStr,
+      sectionLabel: "Ayer",
+      isToday: false
+    };
+  }
+
+  // If no preceding header found, it means this row is at the very top of the list (before any header) -> it IS Hoy
+  if (!matchedHeader) {
+    return {
+      dateStr: todayStr,
+      sectionLabel: "Hoy",
+      isToday: true
+    };
+  }
+
+  if (matchedHeader) {
+    if (matchedHeader.numericDate) {
+      const [,day,month,year] = matchedHeader.numericDate;
+      const dateStr = `${year}-${month}-${day}`;
+      const parsed = new Date(`${dateStr}T12:00:00-03:00`);
+      if (!Number.isFinite(parsed.getTime()) || getArgDate(parsed) !== dateStr) return null;
+      return {dateStr,sectionLabel:matchedHeader.text,isToday:dateStr===todayStr};
+    }
+    if (matchedHeader.isToday) {
+      return {
+        dateStr: todayStr,
+        sectionLabel: "Hoy",
+        isToday: true
+      };
+    }
+
+    if (matchedHeader.isYesterday) {
+      return {
+        dateStr: yesterdayStr,
+        sectionLabel: "Ayer",
+        isToday: false
+      };
+    }
+
+    if (matchedHeader.dateMatch) {
+      const day = parseInt(matchedHeader.dateMatch[1], 10);
+      const mIdx = months.indexOf(matchedHeader.dateMatch[2]);
+      const year = matchedHeader.dateMatch[3] ? parseInt(matchedHeader.dateMatch[3], 10) : Number(todayStr.slice(0,4));
+      if (mIdx !== -1 && !isNaN(day)) {
+        const pad = (n) => String(n).padStart(2, "0");
+        const dStr = `${year}-${pad(mIdx + 1)}-${pad(day)}`;
+        const parsed = new Date(`${dStr}T12:00:00-03:00`);
+        if (!Number.isFinite(parsed.getTime()) || getArgDate(parsed) !== dStr) return null;
+        return {
+          dateStr: dStr,
+          sectionLabel: matchedHeader.text,
+          isToday: dStr === todayStr
+        };
+      }
+    }
+
+    if (matchedHeader.weekdayMatch && matchedHeader.weekdayStr) {
+      const daysMap = { domingo: 0, lunes: 1, martes: 2, miercoles: 3, "miércoles": 3, jueves: 4, viernes: 5, sabado: 6, "sábado": 6 };
+      const dayNum = daysMap[matchedHeader.weekdayStr];
+      if (dayNum !== undefined) {
+        const currentDayNum = new Date(todayStr+'T12:00:00Z').getUTCDay();
+        let diff = currentDayNum - dayNum;
+        if (diff <= 0) diff += 7;
+        const targetDate = new Date(now.getTime() - diff * 24 * 3600 * 1000);
+        const dStr = getArgDate(targetDate);
+        return {
+          dateStr: dStr,
+          sectionLabel: matchedHeader.text,
+          isToday: dStr === todayStr
+        };
+      }
+    }
+  }
+
+  if (requireEvidence) return null;
+  return {
+    dateStr: todayStr,
+    sectionLabel: "Hoy",
+    isToday: true
+  };
+}
+
