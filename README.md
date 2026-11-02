@@ -1,15 +1,13 @@
-# Zono MP Monitor: actualización 1.7.6
+# Zono MP Monitor 1.7.7
 
-Requiere una instalación existente 1.7.5 o 1.7.6. Este paquete no es una extensión completa para instalar desde cero.
+Actualizador de reservas para instalaciones 1.7.5 o 1.7.6. Requiere Node.js.
 
-Corrige las referencias de Actividad que se guardaban como Hoy o Ayer cuando no se reconocía el encabezado de fecha. Reconoce encabezados DD/MM/YYYY y omite filas sin fecha comprobable. Mantiene las frecuencias y la configuración de cuentas, claves y reservas existentes. No corrige automáticamente referencias históricas ni modifica movimientos contables.
+Ejecutar en una terminal:
 
-1. Descargar y extraer el ZIP completo.
-2. En chrome://extensions, identificar la carpeta que tiene cargada Zono MP Monitor.
-3. Con Node.js instalado, ejecutar desde PowerShell: node .\ACTUALIZAR.cjs "C:\ruta\a\la\extension". Alternativamente, ACTUALIZAR.ps1 funciona cuando la política de Windows permite scripts.
-4. El actualizador valida los archivos y guarda una copia de los cuatro archivos afectados en una carpeta de respaldo antes de reemplazarlos. No borra configuraciones de Chrome.
-5. Pulsar Recargar en chrome://extensions y recargar las pestañas de Mercado Pago. Repetir en cada instalación que monitorea cuentas.
+    node ACTUALIZAR.cjs "C:\ruta\a\la\extension"
 
-Si Windows bloquea scripts de PowerShell, usar ACTUALIZAR.cjs con Node.js sin cambiar la política de seguridad. Para volver atrás, copiar los cuatro archivos del respaldo a la carpeta original y recargar la extensión.
+Luego recargar Zono MP Monitor en chrome://extensions y recargar las pestañas de Mercado Pago.
 
-Validación: pruebas de fechas sin encabezado, fechas explícitas, captura bancaria, refresco y equivalencia con el paquete interno probado. Esta publicación no actualiza Chrome automáticamente.
+Reintenta la conexión al monitor, recupera una pestaña abierta si perdió la anterior y recarga lectores que no responden (como máximo una vez cada cinco minutos). Guardar configuración ya no produce una pausa permanente. La pausa manual sigue disponible. Debe permanecer abierta una pestaña de la reserva con la sesión iniciada.
+
+Sólo actualiza manifest.json, reserve-monitor.js y reserve-reader.js; conserva el resto de la configuración y crea un respaldo. No contiene claves. No cambia movimientos contables.
